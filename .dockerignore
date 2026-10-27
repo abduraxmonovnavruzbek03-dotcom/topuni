@@ -1,0 +1,11 @@
+.env
+app/.env
+.venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.coverage
+*.db
+private_uploads
+web/node_modules
+web/dist
