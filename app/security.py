@@ -20,11 +20,15 @@ def verify_password(password: str, hashed: str) -> bool:
     return password_hash.verify(password, hashed)
 
 
-def create_access_token(user_id: int) -> tuple[str, str, datetime]:
+def create_access_token(user_id: int, session_id: str) -> tuple[str, str, datetime]:
     now = datetime.now(timezone.utc)
     expires = now + timedelta(minutes=settings.access_token_expire_minutes)
     jti = str(uuid.uuid4())
-    token = jwt.encode({"sub": str(user_id), "jti": jti, "iat": now, "exp": expires}, settings.secret_key, algorithm=ALGORITHM)
+    token = jwt.encode(
+        {"sub": str(user_id), "jti": jti, "sid": session_id, "iat": now, "exp": expires},
+        settings.secret_key,
+        algorithm=ALGORITHM,
+    )
     return token, jti, expires
 
 

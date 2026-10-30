@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:change-me@localhost:5432/uniapply"
     secret_key: str = Field(min_length=32)
     access_token_expire_minutes: int = Field(default=60, gt=0)
+    refresh_token_expire_days: int = Field(default=30, gt=0)
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_username: str = ""

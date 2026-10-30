@@ -112,6 +112,9 @@ def test_forgot_and_reset_password(client):
         "password": "original-password", "first_name": "A", "last_name": "B",
     })
 
+    active_refresh_token = http.post("/auth/login", json={
+        "username": "reset_user", "password": "original-password",
+    }).json()["refresh_token"]
     response = http.post("/auth/forgot-password", json={"email": "reset@example.com"})
     assert response.status_code == 202
     reset_code = sent[-1][2].split("is ")[1].split(".")[0]
@@ -121,9 +124,37 @@ def test_forgot_and_reset_password(client):
         "new_password": "replacement-password",
     })
     assert response.status_code == 200
+    assert http.post("/auth/refresh", json={"refresh_token": active_refresh_token}).status_code == 401
     assert http.post("/auth/login", json={
         "username": "reset_user", "password": "replacement-password",
     }).status_code == 200
+
+
+def test_refresh_rotates_tokens_and_logout_revokes_the_session(client):
+    http, _, sent = client
+    http.post("/auth/otp/request", json={"email": "refresh@example.com", "purpose": "registration"})
+    code = sent[-1][2].split("is ")[1].split(".")[0]
+    http.post("/auth/otp/verify", json={"email": "refresh@example.com", "code": code})
+    http.post("/auth/register", json={
+        "email": "refresh@example.com", "username": "refresh_user",
+        "password": "strong-password", "first_name": "A", "last_name": "B",
+    })
+    login = http.post("/auth/login", json={
+        "username": "refresh_user", "password": "strong-password",
+    }).json()
+
+    refreshed = http.post("/auth/refresh", json={"refresh_token": login["refresh_token"]})
+    assert refreshed.status_code == 200
+    tokens = refreshed.json()
+    assert tokens["access_token"] != login["access_token"]
+    assert tokens["refresh_token"] != login["refresh_token"]
+    assert http.post("/auth/refresh", json={"refresh_token": login["refresh_token"]}).status_code == 401
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    assert http.get("/auth/me", headers=headers).status_code == 200
+
+    assert http.post("/auth/logout", headers=headers).status_code == 200
+    assert http.post("/auth/refresh", json={"refresh_token": tokens["refresh_token"]}).status_code == 401
+    assert http.get("/auth/me", headers=headers).status_code == 401
 
 
 def test_first_admin_setup_is_secret_protected_and_one_time(client, monkeypatch):

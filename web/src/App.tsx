@@ -8,6 +8,7 @@ import {
 
 type Role = "student" | "staff" | "admin";
 type User = { id: number; email: string; username: string; role: Role; is_active: boolean };
+type TokenResponse = { access_token: string; refresh_token: string; user: User };
 type University = {
   id: number; name: string; country: string; city: string; description: string;
   website?: string | null; contact_email: string; is_approved: boolean; review_status: string;
@@ -30,12 +31,76 @@ type Notification = { id: number; title: string; message: string; is_read: boole
 type AdminStats = { users: number; students: number; staff: number; universities: number; pending_universities: number; programs: number; applications: number };
 
 const apiRoot = "/api";
+let accessTokenListener: ((token: string | null) => void) | null = null;
+let refreshInFlight: Promise<TokenResponse> | null = null;
+
+function clearStoredTokens() {
+  localStorage.removeItem("uniapply_token");
+  localStorage.removeItem("uniapply_refresh_token");
+  accessTokenListener?.(null);
+}
+
+function refreshTokens(): Promise<TokenResponse> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const refreshToken = localStorage.getItem("uniapply_refresh_token");
+      if (!refreshToken) {
+        clearStoredTokens();
+        throw new Error("Sessiya tugagan. Iltimos, qayta kiring.");
+      }
+      const response = await fetch(`${apiRoot}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!response.ok) {
+        if (response.status === 401) clearStoredTokens();
+        let message = `Sessiyani yangilab bo‘lmadi (${response.status})`;
+        try {
+          const body = await response.json();
+          if (typeof body.detail === "string") message = body.detail;
+        } catch { /* Error responses can be empty. */ }
+        throw new Error(message);
+      }
+      const tokens = await response.json() as TokenResponse;
+      if (!tokens.access_token || !tokens.refresh_token) {
+        throw new Error("Sessiyani yangilashda yaroqsiz javob olindi");
+      }
+      localStorage.setItem("uniapply_token", tokens.access_token);
+      localStorage.setItem("uniapply_refresh_token", tokens.refresh_token);
+      accessTokenListener?.(tokens.access_token);
+      return tokens;
+    })().finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+async function fetchWithRefresh(url: string, options: RequestInit, token?: string | null): Promise<Response> {
+  let response = await fetch(url, options);
+  if (response.status === 401 && token) {
+    const refreshed = await refreshTokens();
+    const headers = new Headers(options.headers);
+    headers.set("Authorization", `Bearer ${refreshed.access_token}`);
+    response = await fetch(url, { ...options, headers });
+  }
+  return response;
+}
+
 const API = {
+  setTokenListener(listener: ((token: string | null) => void) | null) {
+    accessTokenListener = listener;
+  },
+  fetch(path: string, options: RequestInit = {}, token?: string | null) {
+    const headers = new Headers(options.headers);
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const requestToken = token ?? (headers.has("Authorization") ? localStorage.getItem("uniapply_token") : null);
+    return fetchWithRefresh(`${apiRoot}${path}`, { ...options, headers }, requestToken);
+  },
   async request<T>(path: string, options: RequestInit = {}, token?: string | null): Promise<T> {
     const headers = new Headers(options.headers);
     if (token) headers.set("Authorization", `Bearer ${token}`);
     if (options.body && !(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
-    const response = await fetch(`${apiRoot}${path}`, { ...options, headers });
+    const response = await fetchWithRefresh(`${apiRoot}${path}`, { ...options, headers }, token);
     if (!response.ok) {
       let message = `So‘rov bajarilmadi (${response.status})`;
       try {
@@ -171,6 +236,11 @@ function App() {
   }, []);
 
   useEffect(() => {
+    API.setTokenListener(setToken);
+    return () => API.setTokenListener(null);
+  }, []);
+
+  useEffect(() => {
     loadPublic();
   }, [loadPublic]);
 
@@ -198,7 +268,7 @@ function App() {
       setUser(currentUser);
       void loadUserData(token, currentUser);
     }).catch(() => {
-      localStorage.removeItem("uniapply_token");
+      clearStoredTokens();
       setToken(null);
       setUser(null);
     });
@@ -225,22 +295,23 @@ function App() {
     );
   }, [programs, universities, query]);
 
-  const completeLogin = (accessToken: string, nextUser: User) => {
-    localStorage.setItem("uniapply_token", accessToken);
-    setToken(accessToken);
-    setUser(nextUser);
+  const completeLogin = (result: TokenResponse) => {
+    localStorage.setItem("uniapply_token", result.access_token);
+    localStorage.setItem("uniapply_refresh_token", result.refresh_token);
+    setToken(result.access_token);
+    setUser(result.user);
     setAuthMode(null);
     setError("");
     setPage("overview");
-    flash(`Xush kelibsiz, ${nextUser.username}!`);
+    flash(`Xush kelibsiz, ${result.user.username}!`);
   };
 
   const onLogin = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true); setError("");
     try {
-      const result = await API.post<{ access_token: string; user: User }>("/auth/login", loginForm);
-      completeLogin(result.access_token, result.user);
+      const result = await API.post<TokenResponse>("/auth/login", loginForm);
+      completeLogin(result);
     } catch (reason) { fail(reason); } finally { setBusy(false); }
   };
 
@@ -266,8 +337,8 @@ function App() {
     setBusy(true); setError("");
     try {
       await API.post("/auth/register", registerForm);
-      const result = await API.post<{ access_token: string; user: User }>("/auth/login", { username: registerForm.username, password: registerForm.password });
-      completeLogin(result.access_token, result.user);
+      const result = await API.post<TokenResponse>("/auth/login", { username: registerForm.username, password: registerForm.password });
+      completeLogin(result);
     } catch (reason) { fail(reason); } finally { setBusy(false); }
   };
 
@@ -291,10 +362,10 @@ function App() {
     setBusy(true); setError("");
     try {
       await API.post("/auth/staff/accept-invitation", staffAcceptForm);
-      const result = await API.post<{ access_token: string; user: User }>("/auth/login", {
+      const result = await API.post<TokenResponse>("/auth/login", {
         username: staffAcceptForm.username, password: staffAcceptForm.password,
       });
-      completeLogin(result.access_token, result.user);
+      completeLogin(result);
     } catch (reason) { fail(reason); } finally { setBusy(false); }
   };
 
@@ -304,16 +375,18 @@ function App() {
     try {
       const created = await API.post<User>("/auth/register-admin", adminSetupForm);
       setAdminSetupAvailable(false);
-      const result = await API.post<{ access_token: string; user: User }>("/auth/login", {
+      const result = await API.post<TokenResponse>("/auth/login", {
         username: created.username, password: adminSetupForm.password,
       });
-      completeLogin(result.access_token, result.user);
+      completeLogin(result);
     } catch (reason) { fail(reason); } finally { setBusy(false); }
   };
 
   const logout = async () => {
-    if (token) await API.post("/auth/logout", {}, token).catch(() => undefined);
-    localStorage.removeItem("uniapply_token");
+    try {
+      if (token) await API.post("/auth/logout", {}, token);
+    } catch (reason) { fail(reason); }
+    clearStoredTokens();
     setToken(null); setUser(null); setProfile(null); setApplications([]);
     setAchievements([]); setNotifications([]); setPage("overview"); setAuthMode(null);
     flash("Hisobdan xavfsiz chiqildi");
@@ -797,7 +870,7 @@ function ApplicationDetails({ application, token }: { application: Application; 
   const download = async (document: ApplicationDocument) => {
     if (!token) return;
     try {
-      const response = await fetch(`${apiRoot}/documents/${document.id}/download`, { headers: { Authorization: `Bearer ${token}` } });
+      const response = await API.fetch(`/documents/${document.id}/download`, { headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) throw new Error("Faylni yuklab bo‘lmadi");
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -880,7 +953,7 @@ function ReviewPage({ applications, programs, token, selected, setSelected, comm
   const downloadDocument = async (document: ApplicationDocument) => {
     if (!token) return;
     try {
-      const response = await fetch(`${apiRoot}/documents/${document.id}/download`, {
+      const response = await API.fetch(`/documents/${document.id}/download`, {
         headers: { Authorization: `******` },
       });
       if (!response.ok) throw new Error(`Hujjatni yuklab bo‘lmadi (${response.status})`);

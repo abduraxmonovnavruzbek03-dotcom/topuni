@@ -12,7 +12,7 @@ app = FastAPI(
     description="University application platform for Uzbekistan and international applicants. Eligibility estimates are informational and do not guarantee admission.",
     version="1.0.0",
     openapi_tags=[
-        {"name": "Authentication", "description": "Email verification, student registration, login, and account security."},
+        {"name": "Authentication", "description": "Email verification, registration, login, refresh-token sessions, and account security."},
         {"name": "Students", "description": "Student profile and achievement management."},
         {"name": "Universities", "description": "Public approved university directory and staff self-service."},
         {"name": "Programs", "description": "University program catalog and management."},

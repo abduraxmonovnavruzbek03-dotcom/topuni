@@ -2,21 +2,22 @@ from datetime import datetime, timedelta, timezone
 
 import hmac
 import smtplib
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import bearer_scheme, get_current_user
 from app.email_service import send_email
-from app.models import EmailOTP, RevokedToken, StaffInvitation, StudentProfile, UniversityStaff, User, utcnow
+from app.models import EmailOTP, RefreshToken, RevokedToken, StaffInvitation, StudentProfile, UniversityStaff, User, utcnow
 from app.schemas import (
-    AdminRegistration, ChangePassword, LoginRequest, MessageOut, OTPRequest, OTPVerify,
+    AdminRegistration, ChangePassword, LoginRequest, MessageOut, OTPRequest, OTPVerify, RefreshRequest,
     PasswordReset, ForgotPasswordRequest, RegisterRequest, StaffAccept, TokenOut, UserOut,
 )
-from app.security import create_access_token, digest, generate_otp, hash_password, verify_password
+from app.security import create_access_token, digest, generate_otp, generate_secret_token, hash_password, verify_password
 from app.settings import settings
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -149,8 +150,54 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.username == payload.username))
     if not user or not verify_password(payload.password, user.password_hash) or not user.is_active:
         raise HTTPException(status_code=401, detail="Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
-    token, _, _ = create_access_token(user.id)
-    return {"access_token": token, "user": user}
+    session_id = str(uuid.uuid4())
+    access_token, _, _ = create_access_token(user.id, session_id)
+    refresh_token = generate_secret_token()
+    db.add(RefreshToken(
+        token_hash=digest(refresh_token),
+        user_id=user.id,
+        session_id=session_id,
+        expires_at=utcnow() + timedelta(days=settings.refresh_token_expire_days),
+    ))
+    db.commit()
+    return {"access_token": access_token, "refresh_token": refresh_token, "user": user}
+
+
+@router.post("/refresh", response_model=TokenOut)
+def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
+    now = utcnow()
+    token_hash = digest(payload.refresh_token)
+    refresh_session = db.scalar(select(RefreshToken).where(
+        RefreshToken.token_hash == token_hash,
+        RefreshToken.revoked_at.is_(None),
+        RefreshToken.expires_at > now,
+    ))
+    if not refresh_session:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    user = db.get(User, refresh_session.user_id)
+    if not user or not user.is_active:
+        refresh_session.revoked_at = now
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    claimed = db.execute(update(RefreshToken).where(
+        RefreshToken.token_hash == token_hash,
+        RefreshToken.revoked_at.is_(None),
+        RefreshToken.expires_at > now,
+    ).values(revoked_at=now).execution_options(synchronize_session=False))
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+    access_token, _, _ = create_access_token(user.id, refresh_session.session_id)
+    next_refresh_token = generate_secret_token()
+    db.add(RefreshToken(
+        token_hash=digest(next_refresh_token),
+        user_id=user.id,
+        session_id=refresh_session.session_id,
+        expires_at=now + timedelta(days=settings.refresh_token_expire_days),
+    ))
+    db.commit()
+    return {"access_token": access_token, "refresh_token": next_refresh_token, "user": user}
 
 
 @router.post("/logout", response_model=MessageOut)
@@ -160,12 +207,18 @@ def logout(credentials=Depends(bearer_scheme), db: Session = Depends(get_db)):
     try:
         claims = decode_access_token(credentials.credentials)
         jti = claims["jti"]
+        session_id = claims.get("sid")
         expires = datetime.fromtimestamp(claims["exp"], timezone.utc)
     except (JWTError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired credentials") from exc
     if not db.get(RevokedToken, jti):
         db.add(RevokedToken(jti=jti, expires_at=expires))
-        db.commit()
+    if session_id:
+        db.execute(update(RefreshToken).where(
+            RefreshToken.session_id == session_id,
+            RefreshToken.revoked_at.is_(None),
+        ).values(revoked_at=utcnow()))
+    db.commit()
     return {"message": "Logged out"}
 
 
@@ -179,6 +232,10 @@ def change_password(payload: ChangePassword, user: User = Depends(get_current_us
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     user.password_hash = hash_password(payload.new_password)
+    db.execute(update(RefreshToken).where(
+        RefreshToken.user_id == user.id,
+        RefreshToken.revoked_at.is_(None),
+    ).values(revoked_at=utcnow()))
     db.commit()
     return {"message": "Password updated"}
 
@@ -196,6 +253,10 @@ def reset_password(payload: PasswordReset, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
     user.password_hash = hash_password(payload.new_password)
     otp.consumed_at = utcnow()
+    db.execute(update(RefreshToken).where(
+        RefreshToken.user_id == user.id,
+        RefreshToken.revoked_at.is_(None),
+    ).values(revoked_at=utcnow()))
     db.commit()
     return {"message": "Password reset successfully"}
 
