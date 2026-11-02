@@ -5,6 +5,7 @@ import {
   Clock3, FileText, Globe2, GraduationCap, LayoutDashboard, LogOut, Menu,
   Plus, Search, Settings2, ShieldCheck, Sparkles, UserRound, Users, X,
 } from "lucide-react";
+import FregeChatWidget from "./FregeChatWidget";
 
 type Role = "student" | "staff" | "admin";
 type User = { id: number; email: string; username: string; role: Role; is_active: boolean };
@@ -716,6 +717,7 @@ function App() {
       </form></Modal>}
       {toast && <div className="toast"><CheckCircle2 size={18} />{toast}</div>}
       <footer className="app-footer"><span>© 2026 UniApply</span><span>O‘z kelajagingizni bugun boshlang <Sparkles size={13} /></span><a href="mailto:support@uniapply.uz">Yordam markazi</a></footer>
+      <FregeChatWidget apiKey={import.meta.env.VITE_FREGE_API_KEY} agentId={import.meta.env.VITE_FREGE_AGENT_ID} />
     </div>
   );
 }

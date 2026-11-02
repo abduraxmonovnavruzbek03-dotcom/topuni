@@ -39,6 +39,9 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        VITE_FREGE_API_KEY: ${VITE_FREGE_API_KEY:-}
+        VITE_FREGE_AGENT_ID: ${VITE_FREGE_AGENT_ID:-}
     ports:
       - "127.0.0.1:8080:80"
     depends_on:

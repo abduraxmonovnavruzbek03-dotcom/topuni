@@ -2,6 +2,9 @@ FROM node:22-alpine AS build
 
 WORKDIR /web
 
+ARG VITE_FREGE_API_KEY
+ARG VITE_FREGE_AGENT_ID
+
 COPY package*.json ./
 RUN npm ci
 
