@@ -12,6 +12,29 @@
   </head>
   <body>
     <div id="root"></div>
+    <div
+      id="frege-chat"
+      style="position: fixed; right: 24px; bottom: 60px; z-index: 40; width: min(380px, calc(100vw - 32px)); height: 520px; max-height: calc(100vh - 84px)"
+    ></div>
+    <script src="https://mcp.frege.uz/v1/embed.js"></script>
+    <script type="module">
+      const apiKey = import.meta.env.VITE_FREGE_API_KEY;
+      const agentId = import.meta.env.VITE_FREGE_AGENT_ID;
+
+      if (!apiKey || !agentId) {
+        console.error("Frege chat sozlanmagan. .env faylida VITE_FREGE_API_KEY va VITE_FREGE_AGENT_ID ni kiriting.");
+      } else if (!window.Frege) {
+        console.error("Frege chat skripti yuklanmadi.");
+      } else {
+        window.Frege.setApiKey(apiKey);
+        window.Frege.mount({
+          el: "#frege-chat",
+          project: "01a12ec1-1559-757c-ac99-7449a8da79f7",
+          stage: "staging",
+          agent: agentId,
+        });
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

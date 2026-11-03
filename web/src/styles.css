@@ -631,15 +631,3 @@ h1, h2, h3, h4, p { margin-top: 0; }
   .detail-apply-row { align-items: flex-start; flex-direction: column; }
   .detail-apply-row .btn { width: 100%; }
 }
-.frege-chat-widget {
-  position: fixed;
-  right: 24px;
-  bottom: 60px;
-  z-index: 40;
-  width: min(380px, calc(100vw - 32px));
-  height: 520px;
-  max-height: calc(100vh - 84px);
-}
-@media (max-width: 650px) {
-  .frege-chat-widget { right: 16px; bottom: 16px; max-height: 75vh; }
-}
