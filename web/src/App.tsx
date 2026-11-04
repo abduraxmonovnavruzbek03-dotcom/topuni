@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen,
   Check, CheckCircle2, ChevronDown, ChevronRight, CircleHelp,
-  Clock3, FileText, Globe2, GraduationCap, LayoutDashboard, LogOut, Menu,
+  Clock3, FileText, Globe2, GraduationCap, LayoutDashboard, LogOut, Menu, MessageCircle,
   Plus, Search, Settings2, ShieldCheck, Sparkles, UserRound, Users, X,
 } from "lucide-react";
 
@@ -171,6 +171,7 @@ function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [modal, setModal] = useState<"program" | "achievement" | "university" | "invite" | null>(null);
   const [activeProgram, setActiveProgram] = useState<Program | null>(null);
   const [authStep, setAuthStep] = useState<"details" | "verified">("details");
@@ -194,6 +195,17 @@ function App() {
   }, []);
 
   const fail = useCallback((reason: unknown) => setError(reason instanceof Error ? reason.message : "Xatolik yuz berdi"), []);
+
+  const toggleChat = () => {
+    const widget = document.getElementById("frege-chat");
+    if (!widget) {
+      fail(new Error("Yordam chati topilmadi"));
+      return;
+    }
+    const nextOpen = !chatOpen;
+    widget.style.display = nextOpen ? "block" : "none";
+    setChatOpen(nextOpen);
+  };
 
   const loadPublic = useCallback(async () => {
     try {
@@ -667,6 +679,16 @@ function App() {
           }} onClose={() => setShowNotifications(false)} />}
         </div>
       </main>
+      <button
+        className="chat-toggle"
+        type="button"
+        onClick={toggleChat}
+        aria-label={chatOpen ? "Yordam chatini yopish" : "Yordam chatini ochish"}
+        aria-controls="frege-chat"
+        aria-expanded={chatOpen}
+      >
+        {chatOpen ? <X size={22} /> : <MessageCircle size={22} />}
+      </button>
       {authMode && <AuthModal
         mode={authMode} setMode={setAuthMode} onClose={() => { setAuthMode(null); setError(""); }}
         loginForm={loginForm} setLoginForm={setLoginForm} onLogin={onLogin} busy={busy}

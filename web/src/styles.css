@@ -404,6 +404,9 @@ h1, h2, h3, h4, p { margin-top: 0; }
 .muted-label { color: #a0a8b5; font-size: 9px; }
 .notification-popover { position: fixed; z-index: 41; right: 83px; top: 63px; width: 335px; max-height: 490px; display: flex; flex-direction: column; border: 1px solid #eaedf3; border-radius: 12px; background: white; box-shadow: 0 15px 45px #25304a24; }
 .popover-backdrop { position: fixed; z-index: 40; inset: 0; border: 0; background: transparent; }
+.chat-toggle { position: fixed; z-index: 45; right: 24px; bottom: 18px; width: 56px; height: 56px; display: grid; place-items: center; border: 0; border-radius: 50%; color: #fff; background: linear-gradient(145deg, #7664e5, #5d4bc9); box-shadow: 0 8px 22px #5140bd55; transition: transform .18s ease, box-shadow .18s ease; }
+.chat-toggle:hover { transform: translateY(-2px); box-shadow: 0 11px 26px #5140bd66; }
+.chat-toggle:focus-visible { outline: 3px solid #bdb5ff; outline-offset: 3px; }
 .notification-heading { display: flex; align-items: center; gap: 9px; padding: 13px; border-bottom: 1px solid #eff1f4; }
 .notification-heading > div { flex: 1; display: grid; gap: 4px; }
 .notification-heading b { color: #354157; font-size: 11px; }
