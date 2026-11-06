@@ -31,9 +31,14 @@ type Notification = { id: number; title: string; message: string; is_read: boole
 type AdminStats = { users: number; students: number; staff: number; universities: number; pending_universities: number; programs: number; applications: number };
 
 const apiRoot = "/api";
+type FregeWidgetHandle = {
+  destroy: () => void;
+};
+
 type FregeWidget = {
   setApiKey: (apiKey: string) => void;
-  mount: (options: { el: string; project: string; stage: string; agent: string }) => void;
+  setClientId: (id: string | null) => void;
+  mount: (options: { el: string; project: string; stage: string; agent: string }) => FregeWidgetHandle;
 };
 
 declare global {
@@ -43,6 +48,8 @@ declare global {
 }
 
 let fregeScriptPromise: Promise<FregeWidget> | null = null;
+let fregeWidgetHandle: FregeWidgetHandle | null = null;
+let fregeSessionGeneration = 0;
 let accessTokenListener: ((token: string | null) => void) | null = null;
 let refreshInFlight: Promise<TokenResponse> | null = null;
 
@@ -73,9 +80,18 @@ function loadFregeScript(): Promise<FregeWidget> {
   return fregeScriptPromise;
 }
 
+function clearFregeSession() {
+  fregeSessionGeneration += 1;
+  fregeWidgetHandle?.destroy();
+  fregeWidgetHandle = null;
+  window.Frege?.setClientId(null);
+  localStorage.removeItem("frege_client_id");
+}
+
 function clearStoredTokens() {
   localStorage.removeItem("uniapply_token");
   localStorage.removeItem("uniapply_refresh_token");
+  clearFregeSession();
   accessTokenListener?.(null);
 }
 
@@ -263,10 +279,12 @@ function App() {
     }
 
     setChatLoading(true);
+    const sessionGeneration = fregeSessionGeneration;
     try {
       const frege = await loadFregeScript();
+      if (sessionGeneration !== fregeSessionGeneration) return;
       frege.setApiKey(apiKey);
-      frege.mount({
+      fregeWidgetHandle = frege.mount({
         el: "#frege-chat",
         project: "01a12ec1-1559-757c-ac99-7449a8da79f7",
         stage: "staging",
@@ -349,6 +367,11 @@ function App() {
   useEffect(() => {
     if (!token) {
       setUser(null);
+      setChatMounted(false);
+      setChatOpen(false);
+      setChatLoading(false);
+      const widget = document.getElementById("frege-chat");
+      if (widget) widget.style.display = "none";
       return;
     }
     API.get<User>("/auth/me", token).then((currentUser) => {
