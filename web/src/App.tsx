@@ -31,8 +31,47 @@ type Notification = { id: number; title: string; message: string; is_read: boole
 type AdminStats = { users: number; students: number; staff: number; universities: number; pending_universities: number; programs: number; applications: number };
 
 const apiRoot = "/api";
+type FregeWidget = {
+  setApiKey: (apiKey: string) => void;
+  mount: (options: { el: string; project: string; stage: string; agent: string }) => void;
+};
+
+declare global {
+  interface Window {
+    Frege?: FregeWidget;
+  }
+}
+
+let fregeScriptPromise: Promise<FregeWidget> | null = null;
 let accessTokenListener: ((token: string | null) => void) | null = null;
 let refreshInFlight: Promise<TokenResponse> | null = null;
+
+function loadFregeScript(): Promise<FregeWidget> {
+  if (window.Frege) return Promise.resolve(window.Frege);
+  if (!fregeScriptPromise) {
+    fregeScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://mcp.frege.uz/v1/embed.js";
+      script.async = true;
+      script.onload = () => {
+        if (window.Frege) {
+          resolve(window.Frege);
+        } else {
+          script.remove();
+          fregeScriptPromise = null;
+          reject(new Error("Frege chat skripti yuklanmadi."));
+        }
+      };
+      script.onerror = () => {
+        script.remove();
+        fregeScriptPromise = null;
+        reject(new Error("Frege chat skripti yuklanmadi."));
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return fregeScriptPromise;
+}
 
 function clearStoredTokens() {
   localStorage.removeItem("uniapply_token");
@@ -172,6 +211,8 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatMounted, setChatMounted] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
   const [modal, setModal] = useState<"program" | "achievement" | "university" | "invite" | null>(null);
   const [activeProgram, setActiveProgram] = useState<Program | null>(null);
   const [authStep, setAuthStep] = useState<"details" | "verified">("details");
@@ -196,15 +237,49 @@ function App() {
 
   const fail = useCallback((reason: unknown) => setError(reason instanceof Error ? reason.message : "Xatolik yuz berdi"), []);
 
-  const toggleChat = () => {
+  const toggleChat = async () => {
     const widget = document.getElementById("frege-chat");
     if (!widget) {
       fail(new Error("Yordam chati topilmadi"));
       return;
     }
-    const nextOpen = !chatOpen;
-    widget.style.display = nextOpen ? "block" : "none";
-    setChatOpen(nextOpen);
+    if (chatOpen) {
+      widget.style.display = "none";
+      setChatOpen(false);
+      return;
+    }
+
+    const apiKey = import.meta.env.VITE_FREGE_API_KEY;
+    const agentId = import.meta.env.VITE_FREGE_AGENT_ID;
+    if (!apiKey || !agentId) {
+      fail(new Error("Frege chat sozlanmagan. .env faylida VITE_FREGE_API_KEY va VITE_FREGE_AGENT_ID ni kiriting."));
+      return;
+    }
+
+    widget.style.display = "block";
+    if (chatMounted) {
+      setChatOpen(true);
+      return;
+    }
+
+    setChatLoading(true);
+    try {
+      const frege = await loadFregeScript();
+      frege.setApiKey(apiKey);
+      frege.mount({
+        el: "#frege-chat",
+        project: "01a12ec1-1559-757c-ac99-7449a8da79f7",
+        stage: "staging",
+        agent: agentId,
+      });
+      setChatMounted(true);
+      setChatOpen(true);
+    } catch (reason) {
+      widget.style.display = "none";
+      fail(reason);
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const loadPublic = useCallback(async () => {
@@ -683,9 +758,11 @@ function App() {
         className="chat-toggle"
         type="button"
         onClick={toggleChat}
-        aria-label={chatOpen ? "Yordam chatini yopish" : "Yordam chatini ochish"}
+        disabled={chatLoading}
+        aria-label={chatLoading ? "Yordam chati yuklanmoqda" : chatOpen ? "Yordam chatini yopish" : "Yordam chatini ochish"}
         aria-controls="frege-chat"
         aria-expanded={chatOpen}
+        aria-busy={chatLoading}
       >
         {chatOpen ? <X size={22} /> : <MessageCircle size={22} />}
       </button>
